@@ -1,0 +1,36 @@
+PATIENT MEDICAL REPORT
+
+Date: March 15, 2024
+Patient ID: P12345
+
+CHIEF COMPLAINTS:
+- Severe chest pain radiating to left arm
+- Moderate shortness of breath
+- Mild fever
+
+VITAL SIGNS:
+Blood Pressure: 145/95 mmHg
+Heart Rate: 110 bpm
+Temperature: 38.2°C
+Oxygen Saturation: 92%
+
+MEDICAL HISTORY:
+- Hypertension (diagnosed 2018)
+- Type 2 Diabetes (diagnosed 2020)
+- Previous myocardial infarction (2022)
+
+CURRENT MEDICATIONS:
+- Metformin 1000mg twice daily
+- Lisinopril 20mg daily
+- Aspirin 81mg daily
+
+ASSESSMENT:
+Patient presents with symptoms suggestive of possible acute coronary syndrome. 
+Vital signs show elevated blood pressure and heart rate, with mild hypoxemia.
+Temperature indicates low-grade fever.
+
+RECOMMENDATIONS:
+1. Immediate ECG
+2. Cardiac enzyme panel
+3. Chest X-ray
+4. Consider admission for observation 

@@ -1,0 +1,4 @@
+Environment:
+  Variables:
+    SECRETS_ARN: !Ref TriageSecrets
+    S3_BUCKET_NAME: !Ref TriageReportsBucket 
