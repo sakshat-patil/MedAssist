@@ -5,12 +5,13 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import json
 from document_processor import DocumentProcessor
-from agentkit_integration import AgentKitIntegration, StructuredData
+from agentkit_integration import AgentKitIntegration, StructuredData, FollowUpAgent
 from triage_pipeline import TriagePipeline
 from pdf_generator import PDFGenerator
 import os
-import traceback  # ⬅️ added for detailed error logging
+import traceback
 from twilio.rest import Client
+from datetime import datetime
 
 app = FastAPI(
     title="MedAssist AI",
@@ -32,6 +33,7 @@ document_processor = DocumentProcessor()
 agent_kit = AgentKitIntegration()
 triage_pipeline = TriagePipeline()
 pdf_generator = PDFGenerator()
+case_monitor = FollowUpAgent(os.getenv("ANTHROPIC_API_KEY"))
 
 # Initialize Twilio client
 print("Initializing Twilio client...")
@@ -40,14 +42,8 @@ twilio_auth_token = os.getenv("TWILIO_AUTH_TOKEN")
 twilio_phone_number = os.getenv("TWILIO_PHONE_NUMBER")
 doctor_phone_number = os.getenv("DOCTOR_PHONE_NUMBER")
 
-
 if not all([twilio_account_sid, twilio_auth_token, twilio_phone_number, doctor_phone_number]):
     print("WARNING: Missing Twilio credentials. Calls will not be made.")
-    print("Required environment variables:")
-    print("- TWILIO_ACCOUNT_SID")
-    print("- TWILIO_AUTH_TOKEN")
-    print("- TWILIO_PHONE_NUMBER")
-    print("- DOCTOR_PHONE_NUMBER")
     twilio_client = None
 else:
     twilio_client = Client(twilio_account_sid, twilio_auth_token)
@@ -80,38 +76,18 @@ async def analyze_triage(data: StructuredData):
 async def analyze_document(file: UploadFile = File(...)):
     try:
         content = await document_processor.process_file(file)
-        print("Processed document content:", content)
-
         structured_data = agent_kit.extract_structured_data(content)
-        print("Extracted structured data:", structured_data)
-
-        # Analyze risk
         risk_assessment = agent_kit.analyze_risk(structured_data)
-        print("Risk assessment:", risk_assessment)
         
-        # If risk level is HIGH, trigger a Twilio call
-        if risk_assessment.get("risk_level") == "HIGH":
-            print("Risk level is HIGH. Attempting to trigger Twilio call...")
-            print(f"Twilio credentials check:")
-            print(f"Account SID: {twilio_account_sid[:5]}...")
-            print(f"Auth Token: {twilio_auth_token[:5]}...")
-            print(f"From Number: {twilio_phone_number}")
-            print(f"To Number: {doctor_phone_number}")
-            
-            if twilio_client is None:
-                print("ERROR: Twilio client not initialized. Cannot make call.")
-            else:
-                try:
-                    print("Creating Twilio call...")
-                    call = twilio_client.calls.create(
-                        to=doctor_phone_number,
-                        from_=twilio_phone_number,
-                        url="http://demo.twilio.com/docs/voice.xml"
-                    )
-                    print(f"Call initiated successfully. Call SID: {call.sid}")
-                except Exception as e:
-                    print(f"Error triggering Twilio call: {str(e)}")
-                    traceback.print_exc()
+        if risk_assessment.get("risk_level") == "HIGH" and twilio_client:
+            try:
+                call = twilio_client.calls.create(
+                    to=doctor_phone_number,
+                    from_=twilio_phone_number,
+                    url="http://demo.twilio.com/docs/voice.xml"
+                )
+            except Exception as e:
+                print(f"Error triggering Twilio call: {str(e)}")
 
         result = triage_pipeline.process(structured_data)
         pdf_path = pdf_generator.save_report(result)
@@ -141,31 +117,19 @@ async def health_check():
 @app.post("/api/analyze")
 async def analyze_triage(request: TriageRequest) -> Dict[str, Any]:
     try:
-        # Extract structured data
         structured_data = agent_kit.extract_structured_data(request.text)
-        
-        # Analyze risk
         risk_assessment = agent_kit.analyze_risk(structured_data)
         
-        # If risk level is HIGH, trigger a Twilio call
-        if risk_assessment.get("risk_level") == "HIGH":
-            print("Risk level is HIGH. Attempting to trigger Twilio call...")
-            if twilio_client is None:
-                print("ERROR: Twilio client not initialized. Cannot make call.")
-            else:
-                try:
-                    print("Creating Twilio call...")
-                    call = twilio_client.calls.create(
-                        to=doctor_phone_number,
-                        from_=twilio_phone_number,
-                        url="http://demo.twilio.com/docs/voice.xml"
-                    )
-                    print(f"Call initiated successfully. Call SID: {call.sid}")
-                except Exception as e:
-                    print(f"Error triggering Twilio call: {str(e)}")
-                    traceback.print_exc()
+        if risk_assessment.get("risk_level") == "HIGH" and twilio_client:
+            try:
+                call = twilio_client.calls.create(
+                    to=doctor_phone_number,
+                    from_=twilio_phone_number,
+                    url="http://demo.twilio.com/docs/voice.xml"
+                )
+            except Exception as e:
+                print(f"Error triggering Twilio call: {str(e)}")
         
-        # Generate PDF report
         result = {
             "structured_data": structured_data,
             "risk_assessment": risk_assessment
@@ -177,4 +141,37 @@ async def analyze_triage(request: TriageRequest) -> Dict[str, Any]:
     except Exception as e:
         print(f"Error in analyze_triage: {str(e)}")
         traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/follow-up/{case_id}")
+async def follow_up_case(case_id: str, assessment: Dict[str, Any]):
+    """Initiate autonomous follow-up for a medical case."""
+    try:
+        result = await case_monitor.monitor_case(case_id, assessment)
+        return result
+    except Exception as e:
+        print(f"Error in follow-up: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/case-history/{case_id}")
+async def get_case_history(case_id: str):
+    """Get the conversation history for a case."""
+    try:
+        history = await case_monitor.get_case_summary(case_id)
+        return history
+    except Exception as e:
+        print(f"Error getting case history: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/update-case/{case_id}")
+async def update_case(case_id: str, interaction: Dict[str, Any]):
+    """Update the case with new interaction data."""
+    try:
+        await case_monitor.update_conversation_history(case_id, interaction)
+        return {"status": "success", "message": "Case updated successfully"}
+    except Exception as e:
+        print(f"Error updating case: {str(e)}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
